@@ -43,6 +43,7 @@ def solve_inventory_allocation(W, M, d, cs, pr):
 W = 3  # Number of warehouses
 M = 5  # Number of markets
 
+
 # Demand by itemset and market
 d = [
     ({'a'},           [10, 20, 30, 30, 20]), # orders with product a only
