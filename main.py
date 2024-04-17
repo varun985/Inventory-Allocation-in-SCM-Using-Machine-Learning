@@ -1,51 +1,76 @@
 from ortools.linear_solver import pywraplp
 import numpy as np
 
-def solve_inventory_allocation(W, M, d, cs, pr):
+def solve_optimization(W, M, demands, shipping_costs, prices):
+    S = len(demands)  # Number of itemsets
+
     # Compute derived parameters
-    dv = np.array([v for (_, v) in d])
-    pr_itemset = np.zeros((len(d), M))
-    for s in range(len(d)):
+    demands_vector = np.array([v for (_, v) in demands])
+    pr_itemset = np.zeros((S, M))
+    for s in range(S):
         for m in range(M):
-            items = d[s][0]
+            items = demands[s][0]
             for item in items:
-                pr_itemset[s, m] += pr[item][m]
-    
+                pr_itemset[s, m] += prices[item][m]
+
     # Solve the optimization problem
     solver = pywraplp.Solver.CreateSolver('GLOP')
+
+    # Define variables
     q = np.array([[[solver.NumVar(0.0, solver.infinity(), f'q{s}{w}{m}') 
                     for m in range(M)] 
                    for w in range(W)] 
-                  for s in range(len(d))])
+                  for s in range(S)])
 
+    # Define constraints
     for m in range(M): 
-        for s in range(len(d)):
-            solver.Add(np.sum(q[s, :, m]) <= dv[s][m])
+        for s in range(S):
+            solver.Add(np.sum(q[s, :, m]) <= demands_vector[s, m])
 
-    revenue = np.sum([[pr_itemset[s, m] * np.sum(q[s, :, m]) for m in range(M)] for s in range(len(d))])
-    shipping_costs = np.sum(cs * np.sum(q, axis=0))
-    solver.Maximize(revenue - shipping_costs)
+    # Define the objective
+    revenue = np.sum([[pr_itemset[s, m] * np.sum(q[s, :, m]) for m in range(M)] for s in range(S)])
+    shipping_costs_total = np.sum(shipping_costs * np.sum(q, axis=0))
+    solver.Maximize(revenue - shipping_costs_total)
 
+    # Solve 
     status = solver.Solve()
 
+    # Print the results
+    solution_value = np.vectorize(lambda x: x.solution_value())
+    
     if status == pywraplp.Solver.OPTIMAL:
-        solution = {}
+        print('Solution:')
+        print('Objective value =', solver.Objective().Value())
+
+        q_sw = np.zeros((S, W))
+        for s in range(S):
+            for w in range(W):
+                q_sw[s, w] = np.sum(solution_value(q[s, w, :]))
+
+        q_pw = {p : np.zeros(W) for p in prices.keys()}
         for w in range(W):
-            warehouse_solution = {}
-            for item in pr.keys():
-                warehouse_solution[item] = q[ord(item) - ord("a"), w, :].sum()
-            solution[f'Warehouse {w}'] = warehouse_solution
-        return solution, solver.Objective().Value()
+            for s in range(S):
+                for i in demands[s][0]:
+                    q_pw[i][w] += q_sw[s, w]
+
+        for w in range(W):
+            print(f'\nWarehouse {w}:')
+            for k,v in q_pw.items():
+                print(f'\tProduct {k} : {v[w]} units')
+
+            print(f'\tBreakdown by itemsets:')
+            for s in range(S):
+                print(f'\t\t{demands[s][0]} : {q_sw[s, w]}')
+            
     else:
-        return None, None
+        print('The problem does not have an optimal solution.')
 
 # Example usage
 W = 3  # Number of warehouses
 M = 5  # Number of markets
 
-
 # Demand by itemset and market
-d = [
+demands = [
     ({'a'},           [10, 20, 30, 30, 20]), # orders with product a only
     ({'b'},           [20, 30, 10, 40, 10]), # orders with product b only
     ({'c'},           [40, 30, 10, 10, 20]), # orders with product c only
@@ -56,26 +81,18 @@ d = [
 ]
 
 # Shipping costs (cost of shipping one unit from warehouse w to market m)
-cs = np.array([
+shipping_costs = np.array([
     [1.0, 1.0, 1.0, 1.0, 0.2],
     [1.0, 1.0, 0.5, 0.3, 0.5],
     [0.5, 0.3, 3.0, 0.5, 0.5]
 ])
 
 # Product unit price by market
-pr = {
+prices = {
     'a': [1, 2, 1, 3, 1], # product a
     'b': [2, 1, 1, 1, 2], # product b
     'c': [1, 2, 1, 1, 1]  # product c
 }
 
-solution, objective_value = solve_inventory_allocation(W, M, d, cs, pr)
-if solution is not None:
-    print("Optimal Solution:")
-    print(f"Objective Value: {objective_value}")
-    for warehouse, products in solution.items():
-        print(f"{warehouse}:")
-        for product, quantity in products.items():
-            print(f"\t{product}: {quantity} units")
-else:
-    print("The problem does not have an optimal solution.")
+# Solve the optimization problem
+solve_optimization(W, M, demands, shipping_costs, prices)
